@@ -7,6 +7,10 @@ import numpy as np
 import tensorflow as tf
 from vgg import vgg_16
 
+from object_detection.dataset_tools import tf_record_creation_util
+from object_detection.utils import dataset_util
+from object_detection.utils import label_map_util
+import contextlib2
 
 flags = tf.app.flags
 flags.DEFINE_string('data_dir', '', 'Root directory to raw pet dataset.')
@@ -53,12 +57,12 @@ def dict_to_tf_example(data, label):
 
     # Your code here, fill the dict
     feature_dict = {
-        'image/height': None,
-        'image/width': None,
-        'image/filename': None,
-        'image/encoded': None,
-        'image/label': None,
-        'image/format': None,
+        'image/height':  dataset_util.int64_feature(height),
+        'image/width':  dataset_util.int64_feature(width),
+        'image/filename': dataset_util.bytes_feature(data.encode('utf8')),
+        'image/encoded': dataset_util.bytes_feature(encoded_data),
+        'image/label': dataset_util.bytes_feature(encoded_label),
+        'image/format': dataset_util.bytes_feature('jpeg'.encode('utf8')),
     }
     example = tf.train.Example(features=tf.train.Features(feature=feature_dict))
     return example
@@ -66,7 +70,19 @@ def dict_to_tf_example(data, label):
 
 def create_tf_record(output_filename, file_pars):
     # Your code here
-    pass
+     with contextlib2.ExitStack() as tf_record_close_stack:
+       output_tfrecords = tf_record_creation_util.open_sharded_output_tfrecords(
+          tf_record_close_stack, output_filename, 1)
+       for data, label in file_pars:
+          try:
+             tf_example = dict_to_tf_example(data,label)
+             if tf_example:
+                output_tfrecords[0].write(tf_example.SerializeToString())
+          except ValueError:
+             logging.warning('Invalid example: %s, ignoring.', xml_path)
+
+  
+
 
 
 def read_images_names(root, train=True):
