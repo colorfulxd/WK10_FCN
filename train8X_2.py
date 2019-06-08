@@ -99,49 +99,52 @@ with tf.variable_scope('vgg_16/fc8'):
 #pool4 是1/16 原图,需要通过上采样得到1/8 原图，模仿原来的代码
 pool4_feature = end_points['vgg_16/pool4']
 
+#下面是将16S +32S 合并成16S
 with tf.variable_scope('vgg_16/fc8'):
     aux_logits_16s = slim.conv2d(pool4_feature, number_of_classes, [1, 1],
                                  activation_fn=None,
                                  weights_initializer=tf.zeros_initializer,
                                  scope='conv_pool4')
 
-#定义上采样的转置卷积核
+#将32S上采样成16S
 # Perform the upsampling
-upsample_filter_np_x2_P4 = bilinear_upsample_weights(2,  # upsample_factor,
+upsample_filter_np_x2 = bilinear_upsample_weights(2,  # upsample_factor,
                                                   number_of_classes)
 
-#定义上采样之后的输出为原图的1/8 如果以pooling 4的结果做上采样
-upsample_filter_tensor_x2_P4 = tf.Variable(upsample_filter_np_x2_P4, name='vgg_16/fc8/t_conv_x2_P4')
+upsample_filter_tensor_x2 = tf.Variable(upsample_filter_np_x2, name='vgg_16/fc8/t_conv_x2')
 
-#aux_logits_16s 做的话，相当于将1/16变成 1/8 的特征
-upsampled_logits_P4 = tf.nn.conv2d_transpose(aux_logits_16s, upsample_filter_tensor_x2_P4,
-                                          output_shape=tf.shape(aux_logits_8s),
+upsampled_logits_32s = tf.nn.conv2d_transpose(logits, upsample_filter_tensor_x2,
+                                          output_shape=tf.shape(aux_logits_16s),
                                           strides=[1, 2, 2, 1],
                                           padding='SAME')
 
-#定义上采样的转置卷积核,这里需要改成4了
+#将16S和32S上采样的结果合并成16S
+upsampled_logits_16s = upsampled_logits_32s + aux_logits_16s
+
+#定义上采样的转置卷积核
 # Perform the upsampling
-upsample_filter_np_x4 = bilinear_upsample_weights(4,  # upsample_factor,
+upsample_filter_np_x2_16s = bilinear_upsample_weights(2,  # upsample_factor,
                                                   number_of_classes)
 
 #定义上采样之后的输出为原图的1/8 如果以pooling 4的结果做上采样
-upsample_filter_tensor_x4 = tf.Variable(upsample_filter_np_x4, name='vgg_16/fc8/t_conv_x4')
+upsample_filter_tensor_x2_16s = tf.Variable(upsample_filter_np_x2_16s, name='vgg_16/fc8/t_conv_x2_16s')
 
-#这里拿logits 做的话，相当于将1/32变成 1/16 的特征
-upsampled_logits = tf.nn.conv2d_transpose(logits, upsample_filter_tensor_x4,
+#aux_logits_16s 做的话，相当于将1/16变成 1/8 的特征
+upsampled_logits_16s = tf.nn.conv2d_transpose(upsampled_logits_16s, upsample_filter_tensor_x2_16s,
                                           output_shape=tf.shape(aux_logits_8s),
-                                          strides=[1, 4, 4, 1],
+                                          strides=[1, 2, 2, 1],
                                           padding='SAME')
+#将8S和上采样的8S 和并
+upsampled_logits= upsampled_logits_16s + aux_logits_8s
 
-#将1/16 的特征和正常1/16的特征和起来那么，这就是FCN16的结果
-upsampled_logits = upsampled_logits + upsampled_logits_P4 + aux_logits_8s
-
+#定义上采样的转置卷积核,这里需要改成4了
+# Perform the upsampling
 #然后定义FCN16的上采样卷积核，同样的方法，恢复到原图大小
-upsample_filter_np_x16 = bilinear_upsample_weights(upsample_factor,
+upsample_filter_np_8s= bilinear_upsample_weights(upsample_factor,
                                                    number_of_classes)
 
-upsample_filter_tensor_x16 = tf.Variable(upsample_filter_np_x16, name='vgg_16/fc8/t_conv_x16')
-upsampled_logits = tf.nn.conv2d_transpose(upsampled_logits, upsample_filter_tensor_x16,
+upsample_filter_tensor_8s= tf.Variable(upsample_filter_np_8s, name='vgg_16/fc8/t_conv_x8')
+upsampled_logits = tf.nn.conv2d_transpose(upsampled_logits, upsample_filter_tensor_8s,
                                           output_shape=upsampled_logits_shape,
                                           strides=[1, upsample_factor, upsample_factor, 1],
                                           padding='SAME')
@@ -322,7 +325,7 @@ with sess:
 
         gs, _ = sess.run([global_step, train_step], feed_dict=feed_dict_to_use)
         if gs % 10 == 0:
-            gs, loss, summary_string = sess.run([global_step, cross_entropy_loss, merged_summary_op], feed_dict=feed_dict_to_use)
+            loss, summary_string = sess.run([cross_entropy_loss, merged_summary_op], feed_dict=feed_dict_to_use)
             logging.debug("step {0} Current Loss: {1} ".format(gs, loss))
             end = time.time()
             logging.debug("[{0:.2f}] imgs/s".format(10 * batch_size / (end - start)))
